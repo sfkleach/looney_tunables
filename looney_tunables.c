@@ -10,7 +10,7 @@ parse_tunables(char *sanitized_tunables, char *original_tunables)
     char *current_binding = sanitized_tunables;
     size_t sanitized_end = 0;
 
-    while (true) {
+    while (current_binding[0] != '\0') {
         /* Loop invariants:
             - current_binding points to the start of the next unprocessed binding in sanitized_tunables.
             - sanitized_end <= (current_binding - sanitized_tunables).
@@ -27,12 +27,8 @@ parse_tunables(char *sanitized_tunables, char *original_tunables)
 
         /* If we reach the end of the string before getting a valid name-value
            pair, bail out.  */
-        if (current_binding[current_name_len] == '\0') {
-            if (__libc_enable_secure) {
-                sanitized_tunables[sanitized_end] = '\0';
-            }
-            return;
-        }
+        if (current_binding[current_name_len] == '\0')
+            break;
 
         /* We did not find a valid name-value pair before encountering the
            colon. */
