@@ -3,97 +3,110 @@
 #include <stdbool.h>
 #include "dl-tunables.h"
 
-static void
-parse_tunables(char *sanitized_tunables, char *original_tunables)
-{
-    /* ... code removed for clarity. */
-    char *current_binding = sanitized_tunables;
-    size_t sanitized_end = 0;
 
-    while (current_binding[0] != '\0') { // Zero or more bindings to the right of current_binding.
+static bool
+fetch_tunable(char * tunables, char **ename, char **evalue, char **next_tunables) {
+    char *current_binding = tunables;
+    *ename = NULL;
+    *evalue = NULL;
+    *next_tunables = NULL;
+    for(;;) {
+        if (current_binding[0] == '\0')
+            return false;
 
-        /* Loop invariants:
-            - current_binding points to the start of the next unprocessed binding in sanitized_tunables.
-            - sanitized_end <= (current_binding - sanitized_tunables).
-            - all previous (valid) bindings have been copied to sanitized_tunables.
-        */
-
-        char *current_name = current_binding;
+        char * name = current_binding;
         size_t current_name_len = 0;
-
-        /* First, find where the name ends.  */
-        while (current_binding[current_name_len] != '=' && current_binding[current_name_len] != ':' && current_binding[current_name_len] != '\0') {
+        while (name[current_name_len] != '=' && name[current_name_len] != ':' && name[current_name_len] != '\0') {
             current_name_len++;
         }
 
-        /* If we reach the end of the string before getting a valid name-value
-           pair, bail out.  */
-        if (current_binding[current_name_len] == '\0')
-            break;
+        /* If we reach the end of the string before getting a valid name-value pair, bail out.  */
+        if (name[current_name_len] == '\0')
+            return false;
 
-        /* We did not find a valid name-value pair before encountering the
-           colon. */
-        if (current_binding[current_name_len] == ':') {
+        if (name[current_name_len] == ':') {
+            /* We did not find a valid name-value pair before encountering the colon. */
             current_binding += current_name_len + 1;
             continue;
         }
 
-        char * current_value = current_binding + current_name_len + 1;
+        char * value = current_binding + current_name_len + 1;
         size_t current_value_len = 0;
-        while (current_value[current_value_len] != ':' && current_value[current_value_len] != '\0') {
+        while (value[current_value_len] != ':' && value[current_value_len] != '\0') {
             current_value_len++;
         }
 
-        /* Take the value from the original_tunables since we will value need a NULL terminated value.  */
-        char *value = &original_tunables[current_value - sanitized_tunables];
-        /* Ensure null-termination. Note that original tuneables is persistent and can be updated for these purposes. */
+        /* Nul-terminate both strings. */
+        name[current_name_len] = '\0';
         value[current_value_len] = '\0';
 
-        /*  Add the tunable if it exists. Note that we do not use any data
-            from santized_tunables, and do not write past the end of the next
-            tunable pair.
-        */
-        for (size_t i = 0; i < sizeof(tunable_list) / sizeof(tunable_t); i++) {
-            tunable_t *cur = &tunable_list[i];
+        *ename = name;
+        *evalue = value;
+        *next_tunables = current_binding + current_name_len + 1 + current_value_len;
+        if (**next_tunables != '\0') {
+            *next_tunables += 1;
+        }
 
-            if (tunable_is_name(cur->name, current_name)) {
+        return true;
+    }
+}
 
-                if (__libc_enable_secure) {
-                    if (cur->security_level != TUNABLE_SECLEVEL_SXID_ERASE) {
-                        if (sanitized_end > 0) {
-                            sanitized_tunables[sanitized_end++] = ':';
-                        }
+static tunable_t *
+find_tunable(char *name) {
+    for (size_t i = 0; i < sizeof(tunable_list) / sizeof(tunable_t); i++) {
+        tunable_t *cur = &tunable_list[i];
+        if (strcmp(cur->name, name) == 0) {
+            return cur;
+        }
+    }
+    return NULL;
+}
 
-                        /* Note that cur->name is null terminated, so we can use it directly. */
-                        const char *n = cur->name;
+static void
+putchar_tuneable(char *sanitized_tunables, size_t *sanitized_end, char ch) {
+    sanitized_tunables[*sanitized_end] = ch;
+    *sanitized_end = *sanitized_end + 1;
+}
 
-                        while (*n != '\0') {
-                            sanitized_tunables[sanitized_end++] = *n++;
-                        }
+static void
+write_tunable(char *sanitized_tunables, size_t *sanitized_end, char *name, char *value) {
+    if (*sanitized_end > 0) {
+        putchar_tuneable(sanitized_tunables, sanitized_end, ':');
+    }
+    while (*name != '\0') {
+        putchar_tuneable(sanitized_tunables, sanitized_end, *name++);
+    }
+    putchar_tuneable(sanitized_tunables, sanitized_end, ':');
+    while (*value != '\0') {
+        putchar_tuneable(sanitized_tunables, sanitized_end, *value++);
+    }
+}
 
-                        sanitized_tunables[sanitized_end++] = '=';
+static void
+parse_tunables(char *sanitized_tunables, char *original_tunables)
+{
+    char * current_tunables = original_tunables;
+    size_t sanitized_end = 0;
 
-                        for (size_t j = 0; j < current_name_len; j++) {
-                            sanitized_tunables[sanitized_end++] = value[j];
-                        }
-                    }
-
-                    if (cur->security_level != TUNABLE_SECLEVEL_NONE) {
-                        break;
-                    }
+    char *name;
+    char *value;
+    char *next_tunables;
+    while (fetch_tunable(current_tunables, &name, &value, &next_tunables)) {
+        tunable_t *cur = find_tunable(name);
+        if (cur != NULL) {
+            if (__libc_enable_secure) {
+                if (cur->security_level != TUNABLE_SECLEVEL_SXID_ERASE) {
+                    write_tunable(sanitized_tunables, &sanitized_end, name, value);
                 }
-
+                if (cur->security_level != TUNABLE_SECLEVEL_NONE) {
+                    tunable_initialize(cur, value);
+                }
+            } else {
                 tunable_initialize(cur, value);
-                break;
             }
         }
 
-        /* Advance to the next binding. */
-        current_binding += current_name_len + 1 + current_value_len;
-        // Step over the separator, if it exists.
-        if (*current_binding != '\0') {
-            current_binding += 1;
-        }
+        current_tunables = next_tunables;
     }
 
     if (__libc_enable_secure) {
