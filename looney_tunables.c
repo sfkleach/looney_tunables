@@ -10,7 +10,8 @@ parse_tunables(char *sanitized_tunables, char *original_tunables)
     char *current_binding = sanitized_tunables;
     size_t sanitized_end = 0;
 
-    while (current_binding[0] != '\0') {
+    while (current_binding[0] != '\0') { // Zero or more bindings to the right of current_binding.
+
         /* Loop invariants:
             - current_binding points to the start of the next unprocessed binding in sanitized_tunables.
             - sanitized_end <= (current_binding - sanitized_tunables).
@@ -63,7 +64,7 @@ parse_tunables(char *sanitized_tunables, char *original_tunables)
                             sanitized_tunables[sanitized_end++] = ':';
                         }
 
-                        /* Note that cur->name is null terminated, so we can use it directly. */  
+                        /* Note that cur->name is null terminated, so we can use it directly. */
                         const char *n = cur->name;
 
                         while (*n != '\0') {
@@ -88,9 +89,10 @@ parse_tunables(char *sanitized_tunables, char *original_tunables)
         }
 
         /* Advance to the next binding. */
-        size_t offset_to_separator = current_name_len + current_value_len + 1;
-        if (current_binding[offset_to_separator] != '\0') {
-            current_binding += offset_to_separator + 1;
+        current_binding += current_name_len + 1 + current_value_len;
+        // Step over the separator, if it exists.
+        if (*current_binding != '\0') {
+            current_binding += 1;
         }
     }
 
